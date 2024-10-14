@@ -1,0 +1,84 @@
+%META:TOPICINFO{author="micha" comment="reprev" date="1728888651" format="1.1" reprev="2" version="2"}%
+---+!! %TOPIC%
+%FORMFIELD{"Description"}%
+
+%TOC%
+
+---++ Description
+
+This is a fresh take on Foswiki's original RCS-based storage, with significant code 
+complexity reduction, faster performance, and less disk space usage as goals. 
+There are a few key distinctions between RCSStoreContrib and RcsFastStoreContrib's design choices.
+
+Many attachments are found to have only been uploaded once. Nevertheless, previous storage 
+implementations required twice as much disk space: once for the initial file and another time 
+as a component of the version control system. Actually, a version control is only necessary 
+in the event that an attachment is uploaded in more than one version. Before storing the second 
+version and all subsequent ones, RcsFastStoreContrib will only then check in the first version. 
+This also applies to the topic text. Version control is really only necessary for topics that have 
+multiple versions.
+
+Another significant distinction compared to previous storage implementations pertains to the 
+monitoring of the filesystem for any out-of-band manipulation, i.e., the modification of files or 
+attachments without the involvement of the Foswiki system itself. This monitoring procedure was 
+implemented for each object being accessed by the storage system. It would then address these 
+out-of-band manipulations to an unknown user by implementing an interim additional revision. 
+If a file were to undergo oob manipulation, subsequent regular modifications made through the Foswiki API 
+would result in two new versions.
+
+RcsFastStoreContrib also does this, but instead of checking for an oob modification during view times, 
+it does so when saving a topic. It should be noted that the act of viewing a page is time-sensitive, 
+while saving a page is not.
+
+---++ Installation Instructions
+
+The new implemtation is activated by setting
+
+<verbatim>
+$Foswiki::cfg{Store}{Implementation} = 'Foswiki::Store::RcsFast';
+</verbatim>
+
+Note that it is straightforward to change from =RcsLite= or =RcsWrap=, part of RCSStoreContrib, to =RcsFast=. 
+Not so much switching from PlainFileStoreContrib's =PlainFile= implementation as this is a completely different version control system.
+
+---++ Optimization of store
+
+RcsFastStoreContrib includes a service procedure that checks the system for redundant revision control files and optionally deletes them. The syntax is:
+
+<verbatim>
+<foswiki-dir>/tools/checkStore 
+  web=...
+  verbose=on/off
+  quiet=on/off
+  unlink=on/off
+</verbatim>
+
+All parameters are optional
+
+   * web: select a single web to check, default all
+   * verbose: enable verbose mode, default off
+   * quiet: enable quiet mode, deffailt off
+   * unlink: enable removal of redundant store files, default off
+
+By default =checkStore= will only report the quantity of files that 
+can be removed and the amount of disk space that will be freed in that manner.
+Only when adding the =unlink=on= paramteter will the procedure actually remove
+those files.
+---++ Dependencies
+%$DEPENDENCIES%
+
+---++ Change History
+
+%TABLE{columnwidths="7em" tablewidth="100%"}%
+|  13 Oct 2024 | first major version |
+
+%META:FORM{name="PackageForm"}%
+%META:FIELD{name="Author" title="Author" value="Michael Daum"}%
+%META:FIELD{name="Version" title="Version" value="%25$VERSION%25"}%
+%META:FIELD{name="Release" title="Release" value="%25$RELEASE%25"}%
+%META:FIELD{name="Description" title="Description" value="%25$SHORTDESCRIPTION%25"}%
+%META:FIELD{name="Repository" title="Repository" value="https://github.com/foswiki/%25$ROOTMODULE%25"}%
+%META:FIELD{name="Copyright" title="Copyright" value="2024, Michael Daum, All Rights Reserved"}%
+%META:FIELD{name="License" title="License" value="GPL ([[http://www.gnu.org/copyleft/gpl.html][GNU General Public License]])"}%
+%META:FIELD{name="Home" title="Home" value="http://foswiki.org/Extensions/%25$ROOTMODULE%25"}%
+%META:FIELD{name="Support" title="Support" value="http://foswiki.org/Support/%25$ROOTMODULE%25"}%
