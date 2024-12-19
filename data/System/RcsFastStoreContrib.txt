@@ -1,4 +1,4 @@
-%META:TOPICINFO{author="micha" comment="reprev" date="1728888651" format="1.1" reprev="2" version="2"}%
+%META:TOPICINFO{author="ProjectContributor" comment="" date="1734606214" format="1.1"  version="1"}%
 ---+!! %TOPIC%
 %FORMFIELD{"Description"}%
 
@@ -70,6 +70,8 @@ those files.
 ---++ Change History
 
 %TABLE{columnwidths="7em" tablewidth="100%"}%
+|  19 Dec 2024 | fixed reading =.changes= file |
+|  30 Oct 2024 | fixed reading old attachment versions |
 |  13 Oct 2024 | first major version |
 
 %META:FORM{name="PackageForm"}%

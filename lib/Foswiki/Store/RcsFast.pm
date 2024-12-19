@@ -35,10 +35,12 @@ use Foswiki::Serialise ();
 use Foswiki::Iterator::NumberRangeIterator ();
 use Foswiki::Time ();
 use Encode();
+use File::Copy ();
+use File::Copy::Recursive ();
 use File::Spec ();
 use File::Path ();
 use Assert;
-use Symbol ();
+use IO::String ();
 use Error qw( :try );
 use Fcntl qw( :DEFAULT :flock );
 
@@ -278,10 +280,7 @@ sub openAttachment {
 
   my $stream;
   if ($mode eq '<' && $opts{version}) {
-
-    $stream = Symbol::gensym; # create an anonymous glob
-    tie(*$stream, 'Foswiki::Store::_MemoryFile', $this->_readAttachment($meta, $attachment, $opts{version}));
-
+    $stream = IO::String->new($this->_readAttachment($meta, $attachment, $opts{version}));
   } else {
     $this->_mkPathTo($file) if $mode =~ />/;
 
@@ -394,7 +393,7 @@ sub saveAttachment {
     && !-e $rcsFile
     && defined $info->{version}
     && $verb eq 'update'
-    && $info->{version} == 2)
+    && $info->{version} == 1)
   {
     my $firstInfo = $this->_getRevInfo($meta, $name, 1);
     $this->_checkIn($meta, $name, $firstInfo->{comment}, $firstInfo->{author}, $firstInfo->{date});
@@ -473,7 +472,7 @@ sub saveTopic {
   $this->_saveFile($file, $text);
 
   if ($info->{version} > 1) {
-    $this->_checkIn($meta, undef, $comment, $cUID, $opts->{forcedate})
+    $this->_checkIn($meta, undef, $comment, $cUID, $opts->{forcedate});
   }
 
   $this->_hasRedundantHistory($meta) if WARN_REDUNDANT_HISTORY;
@@ -506,13 +505,13 @@ sub repRev {
 
   my $maxRev = $this->_getLatestRevFromHistory($file);
 
-  if ( $info->{version} <= 1 ) {
+  if ($info->{version} <= 1) {
     # initial revision, so delete repository file and start again
     unlink $rcsFile;
   } else {
     # only the top revision can be replaced
     if ($info->{version} == $maxRev) {
-      $this->_deleteRevision($meta, $info->{version})
+      $this->_deleteRevision($meta, $info->{version});
     } else {
       $info->{version} = $maxRev;
     }
@@ -691,14 +690,15 @@ sub getApproxRevTime {
 =cut
 
 sub eachChange {
-  my ($this, $web, $since) = @_;
+  my ($this, $webOrMeta, $since) = @_;
 
   #_writeDebug("called eachChange");
-
+  my $web = ref($webOrMeta) ? $webOrMeta->web : $webOrMeta;
   my $file = $this->_getPath(web => $web, file => '.changes');
+  $since //= 0;
 
   my @changes;
-  @changes = reverse grep { $_->{time} >= $since } $this->_readChanges($file)
+  @changes = reverse grep { $_->{time} >= $since } @{$this->_readChanges($file)}
     if -r $file;
 
   return Foswiki::ListIterator->new(\@changes);
@@ -761,7 +761,7 @@ sub eachAttachment {
   $meta->loadVersion() unless $meta->latestIsLoaded();
 
   my @list = ();
-  foreach my $name (map {$_->{name}} $meta->find('FILEATTACHMENT')) {
+  foreach my $name (map { $_->{name} } $meta->find('FILEATTACHMENT')) {
     my $file = $this->_getPath(meta => $meta, attachment => $name);
     next unless -e $file;
     push @list, $name;
@@ -790,9 +790,9 @@ sub eachTopic {
   # the name filter is used to ensure we don't return filenames
   # that contain illegal characters as topic names.
   my @list =
-    map { 
+    map {
       my $tmp = Encode::decode_utf8($_);
-      $tmp =~ s/\.txt$//; 
+      $tmp =~ s/\.txt$//;
       $tmp;
     }
     grep { !/$Foswiki::cfg{NameFilter}/ && /\.txt$/ } readdir($dh);
@@ -904,7 +904,6 @@ sub getRevisionAtTime {
   }
 
   my $date = Foswiki::Time::formatTime($time, '$rcs', 'gmtime');
-
 
   #_writeDebug("calling rlogDateCmd");
   my $cmd = $Foswiki::cfg{RCS}{rlogDateCmd};
@@ -1116,7 +1115,7 @@ sub _getRevInfo {
         # broken storage file, assuming there is no history
         $info = {
           author => $Foswiki::Users::BaseUserMapping::UNKNOWN_USER_CUID,
-          date => time(), 
+          date => time(),
           version => 1
         };
       }
@@ -1139,7 +1138,7 @@ sub _getRevInfoFromHistory {
   my ($this, $meta, $attachment, $version) = @_;
 
   #_writeDebug("calling infoCmd");
-  my $rcsFile = $this->_getPath(meta => $meta, attachment => $attachment).",v";
+  my $rcsFile = $this->_getPath(meta => $meta, attachment => $attachment) . ",v";
   return unless -e $rcsFile;
 
   my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
@@ -1613,7 +1612,7 @@ sub _getWebs {
   $web //= "";
 
   my $wptn = $Foswiki::cfg{WebPrefsTopicName} . ".txt";
-  my $dir = $this->_getPath(web => $web)."/*/$wptn";
+  my $dir = $this->_getPath(web => $web) . "/*/$wptn";
 
   my @list = map {
     my $tmp = Encode::decode_utf8($_);
@@ -1731,7 +1730,7 @@ sub _hasRedundantHistory {
   return 0 if $attachment && $info->{version} > 1;
 
   my $file = $this->_getPath(meta => $meta, attachment => $attachment);
-  my $rcsFile = $file.',v';
+  my $rcsFile = $file . ',v';
   my $webTopic = $meta->getPath;
 
   if ($attachment) {
@@ -1745,7 +1744,7 @@ sub _hasRedundantHistory {
       print STDERR "WARNING: version 1 of $webTopic doesn't need an rcs file yet: $rcsFile\n";
     }
 
-    foreach my $name (map {$_->{name}} $meta->find('FILEATTACHMENT')) {
+    foreach my $name (map { $_->{name} } $meta->find('FILEATTACHMENT')) {
       $res = 1 if $this->_hasRedundantHistory($meta, $name);
     }
   }

@@ -61,7 +61,7 @@ if ($hostname) {
 sub doit {
   printf("=> Processing %s\n", $Foswiki::Contrib::VirtualHostingContrib::VirtualHost::CURRENT) if $verbose;
 
-  $args{topic} //= $Foswiki::cfg{HomeWebName}.'.'.$Foswiki::cfg{HomeTopicName};
+  $args{topic} //= ($Foswiki::cfg{HomeWebName} // $Foswiki::cfg{UsesWebName}).'.'.$Foswiki::cfg{HomeTopicName};
 
   my $req = Foswiki::Request->new(\%args);
   my $foswiki = Foswiki->new('admin', $req);

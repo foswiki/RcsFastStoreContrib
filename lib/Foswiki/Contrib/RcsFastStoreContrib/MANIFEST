@@ -3,6 +3,7 @@ data/System/RcsFastStoreContrib.txt 0644
 lib/Foswiki/Contrib/RcsFastStoreContrib/CheckService.pm 0644
 lib/Foswiki/Contrib/RcsFastStoreContrib/Config.spec 0644
 lib/Foswiki/Contrib/RcsFastStoreContrib/DEPENDENCIES 0644
+lib/Foswiki/Contrib/RcsFastStoreContrib/MANIFEST 0644
 lib/Foswiki/Contrib/RcsFastStoreContrib.pm 0644
 lib/Foswiki/Store/RcsFast.pm 0644
 test/unit/RcsFastStoreContrib/RcsFastStoreContribSuite.pm 0644

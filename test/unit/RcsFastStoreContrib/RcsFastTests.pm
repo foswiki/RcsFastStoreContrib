@@ -885,13 +885,35 @@ sub test_getRevisionAtTime {
   $this->assert_equals(2, $rev, "rev 2 after $info2->{date}");
 }
 
-sub DIStest_del_rev_attachment {
-  # N/A
-}
+sub test_eachChange {
+  my $this = shift;
 
-sub DIStest_getApproxRevTime {
-  # N/A in Foswiki:Meta directly
-}
+  my $webMeta = $this->readWeb;
+  $this->assert($webMeta->existsInStore());
 
+  my $it = $webMeta->eachChange();
+  $this->assert($it);
+
+  my @all = $it->all();
+  $this->assert(scalar(@all) eq 2, "there should be two initial change logs");
+
+  sleep 1;
+
+  my $now = time();
+  $it = $webMeta->eachChange($now);
+  @all = $it->all();
+  $this->assert(!scalar(@all), "there shouldn't be any additional changes");
+
+  my $meta = $this->createTopic;
+  $meta->save;
+  $meta->finish;
+
+  $it = $webMeta->eachChange($now);
+  my $log = $it->next();
+
+  @all = $it->all();
+  $this->assert(!scalar(@all), "there should be exactly one change log");
+  $this->assert_matches(qr/SomeTopic/, $log->{path}, "didn't find recent change");
+}
 
 1;
