@@ -1598,7 +1598,7 @@ sub _readChanges {
 
 ---++ ObjectMethod _getWebs($meta, $all, $result) -> $result
 
-gather all webs recursively
+gather all webs; if all is true then recursively
 
 =cut
 
@@ -1620,14 +1620,11 @@ sub _getWebs {
     $tmp
   } glob($dir);
 
-  push @$result, @list;
-  return $result unless $all;
-
   my $root = $web ? "$web/" : '';
 
   while (my $wp = shift(@list)) {
     push @$result, $root . $wp;
-    push @$result, @{$this->_getWebs($root . $wp, $all)};
+    push @$result, @{$this->_getWebs($root . $wp, $all)} if $all;
   }
 
   return $result;

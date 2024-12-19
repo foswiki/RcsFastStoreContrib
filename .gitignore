@@ -1,5 +1,10 @@
 *,v
 igp_*
+
+/RcsFastStoreContrib_installer
 /RcsFastStoreContrib_installer.pl
-/RcsFastStoreContrib.zip
+/RcsFastStoreContrib.md5
+/RcsFastStoreContrib.sha1
 /RcsFastStoreContrib.tgz
+/RcsFastStoreContrib.txt
+/RcsFastStoreContrib.zip
