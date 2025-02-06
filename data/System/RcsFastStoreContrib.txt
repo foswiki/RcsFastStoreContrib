@@ -1,4 +1,4 @@
-%META:TOPICINFO{author="ProjectContributor" comment="" date="1734620536" format="1.1"  version="1"}%
+%META:TOPICINFO{author="ProjectContributor" comment="" date="1738837685" format="1.1"  version="1"}%
 ---+!! %TOPIC%
 %FORMFIELD{"Description"}%
 
@@ -70,6 +70,7 @@ those files.
 ---++ Change History
 
 %TABLE{columnwidths="7em" tablewidth="100%"}%
+|  06 Jan 2025 | fixed repRev to fix any version info that got out of sync with rcs |
 |  19 Dec 2024 | fixed reading =.changes= file; fixed reading webs |
 |  30 Oct 2024 | fixed reading old attachment versions |
 |  13 Oct 2024 | first major version |
@@ -80,7 +81,7 @@ those files.
 %META:FIELD{name="Release" title="Release" value="%25$RELEASE%25"}%
 %META:FIELD{name="Description" title="Description" value="%25$SHORTDESCRIPTION%25"}%
 %META:FIELD{name="Repository" title="Repository" value="https://github.com/foswiki/%25$ROOTMODULE%25"}%
-%META:FIELD{name="Copyright" title="Copyright" value="2024, Michael Daum, All Rights Reserved"}%
+%META:FIELD{name="Copyright" title="Copyright" value="2024-2025, Michael Daum, All Rights Reserved"}%
 %META:FIELD{name="License" title="License" value="GPL ([[http://www.gnu.org/copyleft/gpl.html][GNU General Public License]])"}%
 %META:FIELD{name="Home" title="Home" value="http://foswiki.org/Extensions/%25$ROOTMODULE%25"}%
 %META:FIELD{name="Support" title="Support" value="http://foswiki.org/Support/%25$ROOTMODULE%25"}%

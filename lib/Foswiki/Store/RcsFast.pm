@@ -1,6 +1,6 @@
 # Foswiki - The Free and Open Source Wiki, http://foswiki.org/
 #
-# Copyright (C) 2024 Michael Daum https://michaeldaumconsulting.com
+# Copyright (C) 2024-2025 Michael Daum https://michaeldaumconsulting.com
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -509,12 +509,8 @@ sub repRev {
     # initial revision, so delete repository file and start again
     unlink $rcsFile;
   } else {
-    # only the top revision can be replaced
-    if ($info->{version} == $maxRev) {
-      $this->_deleteRevision($meta, $info->{version});
-    } else {
-      $info->{version} = $maxRev;
-    }
+    $this->_deleteRevision($meta, $maxRev);
+    $info->{version} = $maxRev;
   }
 
   my $text = Foswiki::Serialise::serialise($meta, 'Embedded');
@@ -1095,7 +1091,7 @@ sub _getRevInfo {
 
     if (!$info && $text) {
 
-      if ($text =~ /^%META:FILEATTACHMENT\{(name="$attachment".*)?\}%$/gm) {
+      if ($text =~ /^%META:FILEATTACHMENT\{(name="\Q$attachment\E".*)?\}%$/gm) {
         $info = _extractRevInfo($1);
       }
     }

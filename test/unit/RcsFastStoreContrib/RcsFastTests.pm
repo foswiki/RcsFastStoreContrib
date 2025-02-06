@@ -527,7 +527,6 @@ SICK
 sub test_fix_topicinfo {
   my $this = shift;
 
-
   my $meta = $this->createTopic;
   $this->assert_equals(undef, $meta->getLoadedRev());
   $meta->save;
@@ -569,7 +568,7 @@ sub test_fix_topicinfo {
   $meta = $this->readTopic;
   $meta->save;
   $info = $meta->getRevisionInfo();
-  $this->assert_equals(4, $info->{version});
+  $this->assert_equals(3, $info->{version});
 }
 
 sub test_unicode_topic {
@@ -620,11 +619,13 @@ sub test_webs {
   my $webObj = $this->createWeb("SomeWeb");
   my $rootWeb = $this->readWeb;
 
+  my $root = $rootWeb->getPath;
+
   # eachWeb
   my $it = $rootWeb->eachWeb();
   my @webs = $it->all;
   $this->assert_equals(1, scalar(@webs));
-  $this->assert_equals("SomeWeb", join(",", @webs));
+  $this->assert_equals("$root/SomeWeb", join(",", @webs));
 
   # webExists
   $this->assert($webObj->existsInStore());

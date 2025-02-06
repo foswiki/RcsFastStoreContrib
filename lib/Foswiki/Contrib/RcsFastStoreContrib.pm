@@ -1,6 +1,6 @@
 # Extension for Foswiki - The Free and Open Source Wiki, http://foswiki.org/
 #
-# RcsFastStoreContrib is Copyright (C) 2024 Michael Daum http://michaeldaumconsulting.com
+# RcsFastStoreContrib is Copyright (C) 2024-2025 Michael Daum http://michaeldaumconsulting.com
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -24,8 +24,8 @@ package Foswiki::Contrib::RcsFastStoreContrib;
 use strict;
 use warnings;
 
-our $VERSION = '1.04';
-our $RELEASE = '19 Dec 2024';
+our $VERSION = '1.05';
+our $RELEASE = '%$RELEASE%';
 our $SHORTDESCRIPTION = 'A simpler faster RCS store';
 our $LICENSECODE = '%$LICENSECODE%';
 our $NO_PREFS_IN_TOPIC = 1;
