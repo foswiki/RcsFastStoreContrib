@@ -504,8 +504,7 @@ sub repRev {
   $info->{date} = $date;
 
   my $maxRev = $this->_getLatestRevFromHistory($file);
-
-  if ($info->{version} <= 1) {
+  if ($maxRev <= 1) {
     # initial revision, so delete repository file and start again
     unlink $rcsFile;
   } else {
@@ -522,7 +521,7 @@ sub repRev {
     $date = Foswiki::Time::formatTime($date, '$rcs', 'gmtime');
     #_writeDebug("calling ciDateCmd");
     my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
-      $Foswiki::cfg{RCS}{ciDateCmd},
+      $Foswiki::cfg{RcsFast}{ciDateCmd},
       DATE => $date,
       USERNAME => $cUID,
       FILENAME => $file,
@@ -530,7 +529,7 @@ sub repRev {
     );
 
     if ($exit) {
-      $stdout = $Foswiki::cfg{RCS}{ciDateCmd} . "\n" . $stdout;
+      $stdout = $Foswiki::cfg{RcsFast}{ciDateCmd} . "\n" . $stdout;
       return $stdout;
     }
 
@@ -561,9 +560,13 @@ sub delRev {
     if $info->{version} <= 1;
 
   my $file = $this->_getPath(meta => $meta);
+  my $rcsFile = $file . ',v';
   my $maxRev = $this->_getLatestRevFromHistory($file);
 
-  if ($info->{version} <= $maxRev) {
+  if ($maxRev <= 1) {
+    # initial revision, so delete repository file and start again
+    unlink $rcsFile;
+  } elsif ($info->{version} <= $maxRev) {
     $this->_deleteRevision($meta, $info->{version});
   } else {
     $info->{version} = $maxRev;
@@ -902,7 +905,7 @@ sub getRevisionAtTime {
   my $date = Foswiki::Time::formatTime($time, '$rcs', 'gmtime');
 
   #_writeDebug("calling rlogDateCmd");
-  my $cmd = $Foswiki::cfg{RCS}{rlogDateCmd};
+  my $cmd = $Foswiki::cfg{RcsFast}{rlogDateCmd};
   my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
     $cmd,
     DATE => $date,
@@ -1035,7 +1038,7 @@ sub _getTopic {
   }
 
   my $isLatest = 0;
-  my $coCmd = $Foswiki::cfg{RCS}{coCmd};
+  my $coCmd = $Foswiki::cfg{RcsFast}{coCmd};
   my $status;
   my $stderr;
 
@@ -1138,7 +1141,7 @@ sub _getRevInfoFromHistory {
   return unless -e $rcsFile;
 
   my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
-    $Foswiki::cfg{RCS}{infoCmd},
+    $Foswiki::cfg{RcsFast}{infoCmd},
     REVISION => '1.' . $version,
     FILENAME => $rcsFile,
   );
@@ -1207,7 +1210,7 @@ sub _readAttachment {
   my $data;
 
   if ($version) {
-    my $coCmd = $Foswiki::cfg{RCS}{coCmd};
+    my $coCmd = $Foswiki::cfg{RcsFast}{coCmd};
     my $status;
     my $stderr;
 
@@ -1404,7 +1407,7 @@ sub _checkIn {
   my ($cmd, $stdout, $exit, $stderr);
   if (defined($date)) {
     $date = Foswiki::Time::formatTime($date, '$rcs', 'gmtime');
-    $cmd = $Foswiki::cfg{RCS}{ciDateCmd};
+    $cmd = $Foswiki::cfg{RcsFast}{ciDateCmd};
     #_writeDebug("calling ciDateCmd");
     ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
       $cmd,
@@ -1415,7 +1418,7 @@ sub _checkIn {
     );
   } else {
     #_writeDebug("calling ciCmd");
-    $cmd = $Foswiki::cfg{RCS}{ciCmd};
+    $cmd = $Foswiki::cfg{RcsFast}{ciCmd};
     ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
       $cmd,
       USERNAME => $user,
@@ -1448,7 +1451,7 @@ sub _lock {
 
   # Try and get a lock on the file
   #_writeDebug("calling lockCmd");
-  my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RCS}{lockCmd}, FILENAME => $file);
+  my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{lockCmd}, FILENAME => $file);
 
   if ($exit) {
 
@@ -1459,8 +1462,8 @@ sub _lock {
     if ((time - _mtime($rcsFile)) > 3600) {
       warn 'Automatic recovery: breaking lock for ' . $file;
       #_writeDebug("calling lockCmd");
-      Foswiki::Sandbox->sysCommand($Foswiki::cfg{RCS}{breaklockCmd}, FILENAME => $file);
-      ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RCS}{lockCmd}, FILENAME => $file);
+      Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{breaklockCmd}, FILENAME => $file);
+      ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{lockCmd}, FILENAME => $file);
     }
     if ($exit) {
 
@@ -1644,7 +1647,7 @@ sub _deleteRevision {
 
   # delete latest revision (unlock (may not be needed), delete revision)
   #_writeDebug("calling unlockCmd");
-  my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RCS}{unlockCmd}, FILENAME => $file);
+  my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{unlockCmd}, FILENAME => $file);
 
   throw Error::Simple("RcsFast: unlockCmd failed: $stdout $stderr")
     if $exit;
@@ -1653,7 +1656,7 @@ sub _deleteRevision {
 
   #_writeDebug("calling delRevCmd");
   ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
-    $Foswiki::cfg{RCS}{delRevCmd},
+    $Foswiki::cfg{RcsFast}{delRevCmd},
     REVISION => '1.' . $rev,
     FILENAME => $file
   );
@@ -1664,7 +1667,7 @@ sub _deleteRevision {
   $rev--;
   #_writeDebug("calling coCmd");
   ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand(
-    $Foswiki::cfg{RCS}{coCmd},
+    $Foswiki::cfg{RcsFast}{coCmd},
     REVISION => '1.' . $rev,
     FILENAME => $file
   );
@@ -1690,7 +1693,7 @@ sub _getLatestRevFromHistory {
   return 1 unless -e $rcsFile;
 
   #_writeDebug("calling histCmd");
-  my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RCS}{histCmd}, FILENAME => $rcsFile);
+  my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{histCmd}, FILENAME => $rcsFile);
 
   throw Error::Simple("RcsFast: histCmd of $rcsFile failed: $stdout $stderr")
     if $exit;
