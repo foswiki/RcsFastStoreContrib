@@ -78,13 +78,15 @@ sub new {
   my $class = shift;
   my $this = $class->SUPER::new(@_);
 
-  #_writeDebug("called new");
+  _writeDebug("called new this=$this");
 
   if (USE_MEMORY_CACHE) {
     $this->{_refInfos} = \%REVINFOS;
   } else {
     $this->{_revInfos} = {};
   }
+
+  $this->{_lockHandles} = {};
 
   return $this;
 }
@@ -98,13 +100,23 @@ sub new {
 sub finish {
   my $this = shift;
 
-  #_writeDebug("called finish");
-  $this->SUPER::finish();
+  _writeDebug("called finish");
+
+  # just to make sure
+  foreach my $file (keys %{$this->{_lockHandles}}) {
+    my $fh = $this->{_lockHandles}{$file};
+    flock($fh, LOCK_UN) ;
+    close($fh);
+    unlink $file if -e $file;
+  }
 
   undef $this->{_revInfos} unless USE_MEMORY_CACHE;
   undef $this->{_json};
+  undef $this->{_lockHandles};
 
   print STDERR "RcsFast: $cacheCounter cache hits\n" if USE_MEMORY_CACHE;
+
+  $this->SUPER::finish();
 }
 
 ### storage api ################################################################
@@ -607,11 +619,34 @@ sub atomicLockInfo {
 sub atomicLock {
   my ($this, $meta, $cUID) = @_;
 
-  #_writeDebug("called atomicLock");
-
   my $file = $this->_getPath(meta => $meta, extension => '.lock');
 
-  $this->_saveFile($file, $cUID . "\n" . time);
+  _writeDebug("called atomicLock $file");
+
+  my $fh = $this->{_lockHandles}{$file};
+
+  if (defined $fh) {
+    _writeDebug("... already locked $file");
+    return $fh;
+  }
+
+  $this->_mkPathTo($file);
+
+  open($fh, ">", $file) 
+    or die "RcsFast: failed to open file $file: $!";
+
+  flock($fh, LOCK_EX) 
+    or die "RcsFast: failed to lock file $file: $!";
+
+  binmode($fh)
+    or die "RcsFast: failed to binmode $file: $!";
+
+  print $fh Encode::encode_utf8($cUID . "\n" . time)
+    or die "RcsFast: failed to print to $file: $!";
+
+  $this->{_lockHandles}{$file} = $fh;
+
+  return $fh;
 }
 
 =begin TML
@@ -623,12 +658,23 @@ sub atomicLock {
 sub atomicUnlock {
   my ($this, $meta, $cUID) = @_;
 
-  #_writeDebug("called atomicUnlock");
-
   my $file = $this->_getPath(meta => $meta, extension => '.lock');
+  _writeDebug("called atomicUnlock $file");
+
+  my $fh = $this->{_lockHandles}{$file};
+  if ($fh) {
+    #_writeDebug("... unlocking fh for $file");
+    delete $this->{_lockHandles}{$file};
+    flock($fh, LOCK_UN) 
+      or die "RcsFast: failed to unlock file $file: $!";
+    close($fh)
+      or die "RcsFast: failed to close file $file: $!";
+  } else {
+    _writeDebug("... already unlocked $file");
+  }
 
   if (-e $file) {
-    unlink $file
+    unlink $file 
       or die "RcsFast: failed to delete $file: $!";
   }
 }
@@ -1450,7 +1496,7 @@ sub _lock {
   return unless -e $rcsFile;
 
   # Try and get a lock on the file
-  #_writeDebug("calling lockCmd");
+  #_writeDebug("1 - calling lockCmd");
   my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{lockCmd}, FILENAME => $file);
 
   if ($exit) {
@@ -1461,7 +1507,7 @@ sub _lock {
 
     if ((time - _mtime($rcsFile)) > 3600) {
       warn 'Automatic recovery: breaking lock for ' . $file;
-      #_writeDebug("calling lockCmd");
+      #_writeDebug("2 - calling lockCmd");
       Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{breaklockCmd}, FILENAME => $file);
       ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{lockCmd}, FILENAME => $file);
     }
@@ -1507,21 +1553,23 @@ sub _saveFile {
   $this->_mkPathTo($file);
 
   my $fh;
+  open($fh, ">", $file) 
+    or die "RcsFast: failed to open file $file: $!";
 
-  open($fh, '>', $file)
-    or die("RcsFast: failed to create file $file: $!");
-
-  flock($fh, LOCK_EX)
-    or die("RcsFast: failed to lock file $file: $!");
+  flock($fh, LOCK_EX) 
+    or die "RcsFast: failed to lock file $file: $!";
 
   binmode($fh)
-    or die("RcsFast: failed to binmode $file: $!");
+    or die "RcsFast: failed to binmode $file: $!";
 
   print $fh Encode::encode_utf8($text)
-    or die("RcsFast: failed to print to $file: $!");
+    or die "RcsFast: failed to print to $file: $!";
+
+  flock($fh, LOCK_UN) 
+    or die "RcsFast: failed to unlock file $file: $!";
 
   close($fh)
-    or die("RcsFast: failed to close file $file: $!");
+    or die "RcsFast: failed to close file $file: $!";
 
   chmod($Foswiki::cfg{Store}{filePermission}, $file);
 
@@ -1578,7 +1626,7 @@ sub _readChanges {
   # Look at the first line to deduce format
   my $changes;
   eval { $changes = $this->_json->decode($text); };
-  print STDERR "Corrupt $file: $@\n" if ($@);
+  print STDERR "Corrupt $file: $@\n" if $@;
 
   foreach my $entry (@$changes) {
     if ($entry->{path} && $entry->{path} =~ m/^(.*)\.(.*)$/) {

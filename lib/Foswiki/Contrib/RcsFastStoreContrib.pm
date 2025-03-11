@@ -24,7 +24,7 @@ package Foswiki::Contrib::RcsFastStoreContrib;
 use strict;
 use warnings;
 
-our $VERSION = '1.10';
+our $VERSION = '1.20';
 our $RELEASE = '%$RELEASE%';
 our $SHORTDESCRIPTION = 'A simpler faster RCS store';
 our $LICENSECODE = '%$LICENSECODE%';

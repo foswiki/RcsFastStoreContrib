@@ -717,7 +717,7 @@ sub test_move_topic {
 
   $this->assert(!$meta->existsInStore);
   $this->assert($newMeta->existsInStore);
-
+ 
   $it = $webObject->eachTopic;
   %topics = map {$_ => 1} $it->all();
   $this->assert(!$topics{"SomeTopic"});
