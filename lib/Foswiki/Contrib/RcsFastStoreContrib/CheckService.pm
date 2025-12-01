@@ -171,7 +171,6 @@ sub checkTopic {
   my $file = _getDataDir($web, $topic);
   my $rcsFile = $file . ',v';
 
-
   if (-e $rcsFile) {
     my $rcsVersion = $this->session->{store}->_getLatestRevFromHistory($file);
     if ($info->{version} > $rcsVersion) {
@@ -195,6 +194,12 @@ sub checkTopic {
     if ($info->{version} > 1) {
       $this->writeInfo(2, "no revision file for $web.$topic yet version > 1 ... must be downgraded to 1");
     }
+  }
+
+  my $storableFile = _getStorableFile($web, $topic);
+  unless (-e $storableFile) {
+    # TODO: do we need this???
+    #$this->writeInfo(2, "... creating meta.db for $web.$topic");
   }
 
   $this->checkAttachments($web, $topic, $stats);
@@ -356,6 +361,12 @@ sub _getDataDir {
   my ($web, $topic) = @_;
 
   return $Foswiki::cfg{DataDir}.'/'.$web.'/'.$topic.'.txt';
+}
+
+sub _getStorableFile {
+  my ($web, $topic) = @_;
+
+  return $Foswiki::cfg{DataDir}.'/'.$web.'/'.$topic.'/.store/meta.db';
 }
 
 sub _getPubDir {

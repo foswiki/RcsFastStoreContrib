@@ -1,4 +1,4 @@
-%META:TOPICINFO{author="ProjectContributor" comment="" date="1741714719" format="1.1"  version="1"}%
+%META:TOPICINFO{author="ProjectContributor" comment="" date="1764590302" format="1.1"  version="1"}%
 ---+!! %TOPIC%
 %FORMFIELD{"Description"}%
 
@@ -70,6 +70,7 @@ those files.
 ---++ Change History
 
 %TABLE{columnwidths="7em" tablewidth="100%"}%
+|  30 Nov 2025 | rewrite caching using Sereal |
 |  11 Mar 2025 | fixed possible race condition in store using proper locking |
 |  07 Jan 2025 | fixed a serious bug in delRev where rcs blocks the server process; using our own config set of rcs tools, i.e. not depending on !RCSStoreContrib to be installed as well |
 |  06 Jan 2025 | fixed repRev to fix any version info that got out of sync with rcs |

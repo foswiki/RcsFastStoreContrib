@@ -24,7 +24,7 @@ package Foswiki::Contrib::RcsFastStoreContrib;
 use strict;
 use warnings;
 
-our $VERSION = '1.20';
+our $VERSION = '2.00';
 our $RELEASE = '%$RELEASE%';
 our $SHORTDESCRIPTION = 'A simpler faster RCS store';
 our $LICENSECODE = '%$LICENSECODE%';
@@ -32,7 +32,7 @@ our $NO_PREFS_IN_TOPIC = 1;
 
 =begin TML
 
----++ ObjectMethod checkStore() 
+---++ ClassMethod checkStore()
 
 =cut
 

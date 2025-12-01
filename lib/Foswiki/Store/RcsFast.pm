@@ -41,15 +41,14 @@ use File::Spec ();
 use File::Path ();
 use Assert;
 use IO::String ();
-use Error qw( :try );
 use Fcntl qw( :DEFAULT :flock );
 
 my %REVINFOS = ();
-my $cacheCounter = 0;
 
 use constant TRACE => 0;
-use constant USE_MEMORY_CACHE => 0; # experimental
 use constant WARN_REDUNDANT_HISTORY => 0;
+use constant USE_STORABLE => 1;
+use constant CREATE_MISSING_STORABLE => 1;
 
 our @ISA = ('Foswiki::Store');
 
@@ -63,6 +62,11 @@ BEGIN {
   if ($Foswiki::cfg{UseLocale}) {
     require locale;
     import locale();
+  }
+
+  if (USE_STORABLE) {
+    require Sereal::Decoder;
+    require Sereal::Encoder;
   }
 }
 
@@ -79,12 +83,6 @@ sub new {
   my $this = $class->SUPER::new(@_);
 
   _writeDebug("called new this=$this");
-
-  if (USE_MEMORY_CACHE) {
-    $this->{_refInfos} = \%REVINFOS;
-  } else {
-    $this->{_revInfos} = {};
-  }
 
   $this->{_lockHandles} = {};
 
@@ -110,11 +108,9 @@ sub finish {
     unlink $file if -e $file;
   }
 
-  undef $this->{_revInfos} unless USE_MEMORY_CACHE;
-  undef $this->{_json};
+  undef $this->{_encoder};
+  undef $this->{_decoder};
   undef $this->{_lockHandles};
-
-  print STDERR "RcsFast: $cacheCounter cache hits\n" if USE_MEMORY_CACHE;
 
   $this->SUPER::finish();
 }
@@ -131,19 +127,30 @@ sub readTopic {
   my ($this, $meta, $version) = @_;
 
   #_writeDebug("### called readTopic(path=".$meta->getPath.", version=" . ($version // 'undef') . ")");
-  my $text;
-  my $isLatest;
 
-  ($text, $isLatest, $version) = $this->_getTopic($meta, $version);
+  my $text;
+
+  ($text, $version) = $this->_getTopic($meta, $version);
+  
+  my $info = $this->_getRevInfo($meta);
+  my $maxRev = $info ? $info->{version} : undef;;
+  my $isLatest = (!$maxRev || !$version || $version >= $maxRev) ? 1:0;
+
+  #print STDERR "version=".($version//'undef').", maxRev=".($maxRev//'undef').", isLatest=$isLatest\n";
 
   unless (defined $text) {
-    $meta->setLoadStatus(undef, $isLatest);
+    $meta->setLoadStatus();
     return (undef, $isLatest);
   }
 
-  Foswiki::Serialise::deserialise($text, 'Embedded', $meta);
-
-  $meta->setLoadStatus($version, $isLatest);
+  if (!$isLatest || !$this->_readFromCache($meta)) {
+    Foswiki::Serialise::deserialise($text, 'Embedded', $meta);
+    $meta->setLoadStatus($version, $isLatest);
+    if ($isLatest && CREATE_MISSING_STORABLE) {
+      #_writeDebug("creating missing storable for ".$meta->getPath);
+      $this->_writeToCache($meta);
+    }
+  }
 
   return ($version, $isLatest);
 }
@@ -166,11 +173,11 @@ sub moveAttachment {
 
   my $newFile = $this->_getPath(meta => $newMeta, attachment => $newAttachment);
 
-  $this->_moveFile($oldFile, $newFile);
+  $this->_move($oldFile, $newFile);
 
   $oldFile .= ',v';
   $newFile .= ',v';
-  $this->_moveFile($oldFile, $newFile) if -e $oldFile;
+  $this->_move($oldFile, $newFile) if -e $oldFile;
 }
 
 =begin TML
@@ -189,12 +196,12 @@ sub copyAttachment {
 
   return unless -e $oldFile;
 
-  $this->_copyFile($oldFile, $newFile);
+  $this->_copy($oldFile, $newFile);
 
   $oldFile .= ",v";
   $newFile .= ",v";
 
-  $this->_copyFile($oldFile, $newFile) if -e $oldFile;
+  $this->_copy($oldFile, $newFile) if -e $oldFile;
 }
 
 =begin TML
@@ -225,18 +232,18 @@ sub moveTopic {
 
   my $oldFile = $this->_getPath(meta => $oldMeta);
   my $newFile = $this->_getPath(meta => $newMeta);
+  $this->_move($oldFile, $newFile);
 
-  $this->_moveFile($oldFile, $newFile);
-
-  $oldFile .= ',v';
-  $newFile .= ',v';
-
-  $this->_moveFile($oldFile, $newFile) if -e $oldFile;
+  my $oldRcsFile = $oldFile . ',v';
+  my $newRcsFile = $newFile . ',v';
+  $this->_move($oldRcsFile, $newRcsFile) if -e $oldRcsFile;
 
   my $oldPub = $this->_getPath(meta => $oldMeta, attachment => "");
   my $newPub = $this->_getPath(meta => $newMeta, attachment => "");
+  $this->_move($oldPub, $newPub) if -d $oldPub;
 
-  $this->_moveFile($oldPub, $newPub) if -d $oldPub;
+  my $oldStorable = $this->_getStorableFile($oldMeta);
+  unlink $oldStorable if -e $oldStorable;
 }
 
 =begin TML
@@ -253,12 +260,12 @@ sub moveWeb {
   my $oldBase = $this->_getPath(meta => $oldMeta);
   my $newBase = $this->_getPath(meta => $newMeta);
 
-  $this->_moveFile($oldBase, $newBase);
+  $this->_move($oldBase, $newBase);
 
   $oldBase = $this->_getPath(meta => $oldMeta, attachment => "");
   $newBase = $this->_getPath(meta => $newMeta, attachment => "");
 
-  $this->_moveFile($oldBase, $newBase) if -d $oldBase;
+  $this->_move($oldBase, $newBase) if -d $oldBase;
 }
 
 =begin TML
@@ -294,13 +301,13 @@ sub openAttachment {
   if ($mode eq '<' && $opts{version}) {
     $stream = IO::String->new($this->_readAttachment($meta, $attachment, $opts{version}));
   } else {
-    $this->_mkPathTo($file) if $mode =~ />/;
+    _mkPathTo($file) if $mode =~ />/;
 
-    throw Error::Simple('RcsFast: stream open ' . $file . ' failed: ' . 'Read requested on directory.')
+    die "RcsFast: stream open $file failed: Read requested on directory." 
       if -d $file;
 
-    throw Error::Simple('RcsFast: stream open ' . $file . ' failed: ' . $!)
-      unless open($stream, $mode, $file);
+    open($stream, $mode, $file)
+      or die "RcsFast: stream open $file failed: $!";
 
     binmode $stream;
   }
@@ -362,8 +369,8 @@ sub getRevisionDiff {
   #_writeDebug("called getRevisionDiff");
 
   my $rev1 = $meta->getLoadedRev // "";
-  my ($text1) = $this->_getTopic($meta, $rev1);
-  my ($text2) = $this->_getTopic($meta, $rev2);
+  my $text1 = $this->_getTopic($meta, $rev1);
+  my $text2 = $this->_getTopic($meta, $rev2);
 
   my $lNew = _split($text1);
   my $lOld = _split($text2);
@@ -421,10 +428,7 @@ sub saveAttachment {
     $nextRev = $this->getNextRevision($meta, $name);
   } else {
     $this->_hasRedundantHistory($meta, $name) if WARN_REDUNDANT_HISTORY;
-
   }
-
-  $this->_unsetRevInfo($meta, $name);
 
   return $nextRev;
 }
@@ -438,11 +442,11 @@ sub saveAttachment {
 sub saveTopic {
   my ($this, $meta, $cUID, $opts) = @_;
 
-  #_writeDebug("### called saveTopic");
+  _writeDebug("### called saveTopic");
 
   my $verb = $this->topicExists($meta->web, $meta->topic) ? 'update' : 'insert';
 
-  throw Error::Simple("RcsFast: Attempting to save a topic that already exists, and forceinsert specified")
+  die "RcsFast: Attempting to save a topic that already exists, and forceinsert specified"
     if $opts->{forceinsert} && $verb eq 'update';
 
   my $info = $meta->get("TOPICINFO");
@@ -479,16 +483,17 @@ sub saveTopic {
       date => $date,
     );
   }
+  $meta->setLoadStatus($nextRev, 1);
 
   my $text = Foswiki::Serialise::serialise($meta, 'Embedded');
   $this->_saveFile($file, $text);
+  $this->_writeToCache($meta);
 
   if ($info->{version} > 1) {
     $this->_checkIn($meta, undef, $comment, $cUID, $opts->{forcedate});
   }
 
   $this->_hasRedundantHistory($meta) if WARN_REDUNDANT_HISTORY;
-  $this->_unsetRevInfo($meta);
 
   return $nextRev;
 }
@@ -502,7 +507,7 @@ sub saveTopic {
 sub repRev {
   my ($this, $meta, $cUID, %opts) = @_;
 
-  #_writeDebug("### called repRev");
+  _writeDebug("### called repRev");
 
   my $file = $this->_getPath(meta => $meta);
   my $rcsFile = $file . ',v';
@@ -524,8 +529,11 @@ sub repRev {
     $info->{version} = $maxRev;
   }
 
+  #print STDERR "info->{version}=$info->{version}, loadedVersion=".$meta->getLoadedRev()."\n";
+
   my $text = Foswiki::Serialise::serialise($meta, 'Embedded');
   $this->_saveFile($file, $text);
+  $this->_writeToCache($meta);
 
   if ($info->{version} > 1) {
     $this->_lock($file);
@@ -549,26 +557,24 @@ sub repRev {
   }
 
   $this->_hasRedundantHistory($meta) if WARN_REDUNDANT_HISTORY;
-  $this->_unsetRevInfo($meta);
 }
 
 =begin TML
 
----++ ObjectMethod delRev( $$metat, $cUID ) -> $rev
+---++ ObjectMethod delRev( $meta, $cUID ) -> $rev
 
 =cut
 
 sub delRev {
   my ($this, $meta, $cUID) = @_;
 
-  #_writeDebug("called delRev");
+  _writeDebug("called delRev");
 
   my $info = $meta->get("TOPICINFO");
 
-  throw Error::Simple("RcsFast: cannot delete non existing version")
-    unless $info;
+  die "RcsFast: cannot delete non existing version" unless $info;
 
-  throw Error::Simple("RcsFast: cannot delete initial revision of " . $meta->getPath())
+  die "RcsFast: cannot delete initial revision of " . $meta->getPath()
     if $info->{version} <= 1;
 
   my $file = $this->_getPath(meta => $meta);
@@ -578,11 +584,11 @@ sub delRev {
   if ($maxRev <= 1) {
     # initial revision, so delete repository file and start again
     unlink $rcsFile;
+    $maxRev = 1;
   } elsif ($info->{version} <= $maxRev) {
-    $this->_deleteRevision($meta, $info->{version});
-  } else {
-    $info->{version} = $maxRev;
-  }
+    $this->_deleteRevision($meta, $maxRev);
+  } 
+  $info->{version} = $maxRev;
 
   # reload the topic object
   $meta->unload();
@@ -621,7 +627,7 @@ sub atomicLock {
 
   my $file = $this->_getPath(meta => $meta, extension => '.lock');
 
-  _writeDebug("called atomicLock $file");
+  #_writeDebug("called atomicLock $file");
 
   my $fh = $this->{_lockHandles}{$file};
 
@@ -630,7 +636,7 @@ sub atomicLock {
     return $fh;
   }
 
-  $this->_mkPathTo($file);
+  _mkPathTo($file);
 
   open($fh, ">", $file) 
     or die "RcsFast: failed to open file $file: $!";
@@ -659,7 +665,7 @@ sub atomicUnlock {
   my ($this, $meta, $cUID) = @_;
 
   my $file = $this->_getPath(meta => $meta, extension => '.lock');
-  _writeDebug("called atomicUnlock $file");
+  #_writeDebug("called atomicUnlock $file");
 
   my $fh = $this->{_lockHandles}{$file};
   if ($fh) {
@@ -877,9 +883,11 @@ sub remove {
     my $file = $this->_getPath(meta => $meta, attachment => $attachment);
     my $rcsFile = $file . ",v";
     my $pubDir = $this->_getPath(meta => $meta, attachment => "");
+    my $storableFile = $this->_getStorableFile($meta);
 
     unlink($file);
     unlink($rcsFile) if -e $rcsFile;
+    unlink($storableFile) if -e $storableFile;
     _rmtree($pubDir) unless $attachment;
 
   } else {
@@ -958,8 +966,7 @@ sub getRevisionAtTime {
     FILENAME => $file,
   );
 
-  throw Error::Simple("RcsFast: rlogDateCmd of $file failed: $stdout $stderr")
-    if $exit;
+  die "RcsFast: rlogDateCmd of $file failed: $stdout $stderr" if $exit;
 
   my $version;
   if ($stdout =~ m/revision \d+\.(\d+)/) {
@@ -1008,7 +1015,7 @@ sub setLease {
     $this->_saveFile($file, join("\n", %$lease));
   } elsif (-e $file) {
     unlink($file)
-      or throw Error::Simple("RcsFast: failed to delete $file: $!");
+      or die "RcsFast: failed to delete $file: $!";
   }
 }
 
@@ -1048,6 +1055,8 @@ sub removeSpuriousLeases {
 
 ---++ ObjectMethod _json() -> $json
 
+returns a JSON object
+
 =cut
 
 sub _json {
@@ -1062,7 +1071,39 @@ sub _json {
 
 =begin TML
 
----++ ObjectMethod _getTopic($meta, $version) -> ($tex, $isLatest, $version)
+---++ ObjectMethod _encoder() -> $encoder
+
+returns a Sereal::Encoder object
+
+=cut
+
+sub _encoder {
+  my $this = shift;
+
+  $this->{_encoder} //= Sereal::Encoder->new();
+
+  return $this->{_encoder};
+}
+
+=begin TML
+
+---++ ObjectMethod _decoder() -> $decoder
+
+returns a Sereal::Decoder object
+
+=cut
+
+sub _decoder {
+  my $this = shift;
+
+  $this->{_decoder} //= Sereal::Decoder->new();
+
+  return $this->{_decoder};
+}
+
+=begin TML
+
+---++ ObjectMethod _getTopic($meta, $version) -> ($tex, $version)
 
 =cut
 
@@ -1074,16 +1115,15 @@ sub _getTopic {
   my $file = $this->_getPath(meta => $meta);
   my $rcsFile = $file . ',v';
   my $info = $this->_getRevInfo($meta, undef, $version);
-  my $text;
+  return unless defined $info;
 
-  return (undef, 0) unless defined $info;
+  my $text;
 
   unless ($version && -e $rcsFile) {
     $text = $this->_readTopic($meta);
-    return ($text, 1, $info->{version});
+    return ($text, $info->{version});
   }
 
-  my $isLatest = 0;
   my $coCmd = $Foswiki::cfg{RcsFast}{coCmd};
   my $status;
   my $stderr;
@@ -1099,15 +1139,10 @@ sub _getTopic {
 
   # test revision against top rev
   if (defined $stderr && $stderr =~ /revision 1\.(\d+)/s) {
-    if ($version > $1) {
-      $isLatest = 1;
-    } else {
-      $isLatest = ($1 == $info->{version});
-    }
     $version = $1;
   }
 
-  return ($text, $isLatest, $version);
+  return wantarray ? ($text, $version) : $text;
 }
 
 =begin TML
@@ -1121,16 +1156,8 @@ sub _getRevInfo {
 
   #_writeDebug("called _getRevInfo");
 
-  my $key = _getRevInfosKey($meta, $attachment, $version);
-  my $info = $this->{_revInfos}{$key};
-
-  if (defined $info) {
-    # found in cache
-    $cacheCounter++;
-    return $info;
-  }
-
   my $text = $this->_readTopic($meta);
+  my $info;
 
   if ($attachment) {
     # cache attachments info
@@ -1167,9 +1194,6 @@ sub _getRevInfo {
     }
   }
 
-  # set cache
-  $this->_setRevInfo($meta, $attachment, $version, $info);
-
   return $info;
 }
 
@@ -1192,8 +1216,7 @@ sub _getRevInfoFromHistory {
     FILENAME => $rcsFile,
   );
 
-  throw Error::Simple("RcsFast: infoCmd of $rcsFile failed: $stdout $stderr")
-    if $exit;
+  die "RcsFast: infoCmd of $rcsFile failed: $stdout $stderr" if $exit;
 
   my $info;
 
@@ -1212,34 +1235,6 @@ sub _getRevInfoFromHistory {
   return $info;
 }
 
-=begin TML
-
----++ ObjectMethod _setRevInfo($meta, $attachment, $version, $info) -> $info
-
-=cut
-
-sub _setRevInfo {
-  my ($this, $meta, $attachment, $version, $info) = @_;
-
-  $this->{_revInfos}{_getRevInfosKey($meta, $attachment, $version)} = $info
-    if defined $info;
-
-  return $info;
-}
-
-=begin TML
-
----++ ObjectMethod _unsetRevInfo($meta, $attachment, $version) 
-
-=cut
-
-sub _unsetRevInfo {
-  my ($this, $meta, $attachment, $version) = @_;
-
-  my $key = _getRevInfosKey($meta, $attachment, $version);
-
-  undef $this->{_revInfos}{$key};
-}
 
 =begin TML
 
@@ -1276,12 +1271,94 @@ sub _readAttachment {
 
 =begin TML
 
+---++ ObjectMethod _readFromCache($meta) -> $boolean
+
+loads the meta object by decoding the Sereal object stored in 
+meta.db fie. returns true on success. 
+
+=cut
+
+sub _readFromCache {
+  my ($this, $meta) = @_;
+
+  return 0 unless USE_STORABLE;
+  my $storableFile = $this->_getStorableFile($meta);
+  return 0 unless -e $storableFile;
+
+  my $topicFile = $this->_getPath(meta => $meta);
+  return 0 if _mtime($storableFile) < _mtime($topicFile);
+
+  my $fh;
+  open($fh, "<", $storableFile) 
+    or die "RcsFast: failed to open file $storableFile: $!";
+
+  #SMELL: performance impact?
+#  flock($fh, LOCK_SH) 
+#    or die "RcsFast: failed to lock file $storableFile: $!";
+
+  my $data = do { local $/; <$fh> };
+
+#  flock($fh, LOCK_UN) 
+#    or die "RcsFast: failed to unlock file $storableFile: $!";
+
+  close($fh)
+    or die "RcsFast: failed to close file $storableFile: $!";
+
+  my $tmpMeta = $this->_decoder->decode($data);
+
+  _copyMeta($tmpMeta, $meta);
+  #_writeDebug("reading meta from storable, version=".$meta->getLoadedRev());
+
+  return 1;
+}
+
+=begin TML
+
+---++ ObjectMethod _writeToCache($meta) 
+
+writes the meta object by encoding it into a Sereal file
+
+=cut
+
+sub _writeToCache {
+  my ($this, $meta) = @_;
+
+  return unless USE_STORABLE;
+  my $file = $this->_getStorableFile($meta);
+  #_writeDebug("writing meta to storable, version=".$meta->getLoadedRev());
+  _mkPathTo($file);
+
+  my $tmpMeta = Foswiki::Meta->new( $Foswiki::Plugins::SESSION, $meta->web, $meta->topic, $meta->text);
+  _copyMeta($meta, $tmpMeta);
+  delete $tmpMeta->{_session};
+
+  my $fh;
+  open($fh, ">", $file) 
+    or die "RcsFast: failed to open file $file: $!";
+
+  flock($fh, LOCK_EX) 
+    or die "RcsFast: failed to lock file $file: $!";
+
+  print $fh $this->_encoder->encode($tmpMeta)
+      or die "RcsFast: failed to encode to '$file': $!";
+
+  flock($fh, LOCK_UN) 
+    or die "RcsFast: failed to unlock file $file: $!";
+
+  close($fh)
+    or die "RcsFast: failed to close file $file: $!";
+}
+
+
+=begin TML
+
 ---++ ObjectMethod _getPath(%args)  -> $filepath
 
 returns the path to an object on the store. args may contain keys:
 
    * meta: object to get the store file for
    * web, topic: either meta or web, topic params are required
+   * subdir: intermedium directory
    * attachment: name of an attachment
    * extension: defaults to .txt
    * file: explicit filename
@@ -1310,14 +1387,21 @@ sub _getPath {
 
   my $attachment = $args{attachment};
   my @path = ();
-  push @path, (defined $attachment ? $Foswiki::cfg{PubDir} : $Foswiki::cfg{DataDir});
-  push @path, $web if $web;
 
-  if ($topic) {
-    if (defined $attachment) {
-      push @path, $topic, $attachment;
+  if (defined $attachment) {
+    push @path, $Foswiki::cfg{PubDir};
+    push @path, $web if $web;
+    push @path, $topic if $topic;
+    push @path, $args{subdir} if $args{subdir};
+    push @path, $attachment if $attachment;
+  } else {
+    push @path, $Foswiki::cfg{DataDir};
+    push @path, $web if $web;
+    if ($args{subdir}) {
+      push @path, $args{subdir} if $args{subdir};
+      push @path, $topic if $topic;
     } else {
-      push @path, $topic . ($args{extension} || '.txt');
+      push @path, $topic . ($args{extension} // '.txt') if $topic;
     }
   }
 
@@ -1328,14 +1412,27 @@ sub _getPath {
 
 =begin TML
 
+---++ ObjectMethod _getStorableFile($meta) -> $filePath
+
+returns the file path where the Sereal object for the given meta
+is being stored
+
+=cut
+
+sub _getStorableFile {
+  my ($this, $meta) = @_;
+  return $this->_getPath(meta => $meta, subdir => ".store", file => "meta.db");
+}
+
+
+=begin TML
+
 ---++ ObjectMethod _readTopic($meta)  -> $text
 
 =cut
 
 sub _readTopic {
   my ($this, $meta) = @_;
-
-  #_writeDebug("called _readTopic");
 
   my $file = $this->_getPath(meta => $meta);
   return unless -e $file;
@@ -1355,83 +1452,65 @@ reads a file from disck
 =cut
 
 sub _readFile {
-  my ($this, $name, $isBinary) = @_;
+  my ($this, $file, $isBinary) = @_;
 
-  #_writeDebug("called _readFile");
+  #_writeDebug("called _readFile($file)");
 
-  my $IN_FILE;
+  my $fh;
+  open($fh, '<', $file)
+    or die "RcsFast: failed to read $file: $!";
 
-  open($IN_FILE, '<', $name)
-    or die "RcsFast: failed to read $name: $!";
+  binmode($fh);
 
-  binmode($IN_FILE);
-  local $/ = undef;
-  my $data = <$IN_FILE>;
-  close($IN_FILE);
+  #SMELL: results in deadlocks for no good reason
+#  flock($fh, LOCK_SH) 
+#    or die "RcsFast: failed to lock file $file: $!";
+
+  my $data = do { local $/; <$fh> };
+
+#  flock($fh, LOCK_UN) 
+#    or die "RcsFast: failed to unlock file $file: $!";
+
+  close($fh);
 
   $data //= '';
+  $data = Encode::decode_utf8($data) unless $isBinary;
 
-  return $data if $isBinary;
-  return Encode::decode_utf8($data);
+  return $data;
 }
 
 =begin TML
 
----++ ObjectMethod _mkPathTo($file) 
-
-creates a path the the given file
+---++ ObjectMethod _move($from, $to) 
 
 =cut
 
-sub _mkPathTo {
-  my ($this, $file) = @_;
-
-  #_writeDebug("called _mkPathTo");
-
-  ASSERT(File::Spec->file_name_is_absolute($file)) if DEBUG;
-
-  my ($volume, $path, undef) = File::Spec->splitpath($file);
-  $path = File::Spec->catpath($volume, $path, '');
-
-  eval { File::Path::mkpath($path, 0, $Foswiki::cfg{Store}{dirPermission}); };
-  if ($@) {
-    throw Error::Simple("RcsFast: failed to create ${path}: $!");
-  }
-}
-
-=begin TML
-
----++ ObjectMethod _moveFile($from, $to) 
-
-=cut
-
-sub _moveFile {
+sub _move {
   my ($this, $from, $to) = @_;
 
-  #_writeDebug("called _moveFile");
+  #_writeDebug("called _move");
 
-  $this->_mkPathTo($to);
+  _mkPathTo($to);
 
-  unless (File::Copy::Recursive::rmove($from, $to)) {
-    throw Error::Simple('RcsFast: move ' . $from . ' to ' . $to . ' failed: ' . $!);
-  }
+  File::Copy::Recursive::rmove($from, $to)
+    or die "RcsFast: move $from to $to failed: $!";
 }
 
 =begin TML
 
----++ ObjectMethod _copyFile($from, to) 
+---++ ObjectMethod _copy($from, to) 
 
 =cut
 
-sub _copyFile {
+sub _copy {
   my ($this, $from, $to) = @_;
 
-  #_writeDebug("called _copyFile");
+  #_writeDebug("called _copy");
 
-  $this->_mkPathTo($to);
-  unless (File::Copy::copy($from, $to)) {
-    throw Error::Simple('RcsFast: copy ' . $from . ' to ' . $to . ' failed: ' . $!);
-  }
+  _mkPathTo($to);
+  
+  File::Copy::Recursive::rcopy($from, $to)
+    or die "RcsFast: copy $from to $to failed: $!";
 }
 
 =begin TML
@@ -1475,8 +1554,7 @@ sub _checkIn {
 
   $stdout ||= '';
 
-  throw Error::Simple("RcsFast: ciCmd/ciDateCmd of $file failed: $stdout $stderr")
-    if $exit;
+  die "RcsFast: ciCmd/ciDateCmd of $file failed: $stdout $stderr" if $exit;
 
   chmod($Foswiki::cfg{Store}{filePermission}, $file);
 }
@@ -1515,7 +1593,7 @@ sub _lock {
 
       # still no luck - bailing out
       $stdout ||= '';
-      throw Error::Simple("RcsFast: lockCmd failed: $stdout $stderr");
+      die "RcsFast: lockCmd failed: $stdout $stderr";
     }
   }
 
@@ -1547,10 +1625,10 @@ sub _revisionHistoryExists {
 sub _saveFile {
   my ($this, $file, $text) = @_;
 
-  #_writeDebug("called _saveFile($file)");
+  _writeDebug("called _saveFile($file)");
   #_writeDebug("... text=$text");
 
-  $this->_mkPathTo($file);
+  _mkPathTo($file);
 
   my $fh;
   open($fh, ">", $file) 
@@ -1587,15 +1665,15 @@ sub _saveStream {
 
   #_writeDebug("called _saveStream");
 
-  $this->_mkPathTo($file);
+  _mkPathTo($file);
 
   my $F;
 
-  open($F, '>', $file)
-    || throw Error::Simple('RcsFast: open ' . $file . ' failed: ' . $!);
+  open($F, '>', $file) or die "RcsFast: open $file failed: $!";
 
-  binmode($F)
-    || throw Error::Simple('RcsFast: failed to binmode ' . $file . ': ' . $!);
+  flock($fh, LOCK_EX) or die "RcsFast: failed to lock file $file: $!";
+
+  binmode($F) || die "RcsFast: failed to binmode $file: $!";
 
   my $data;
 
@@ -1603,8 +1681,9 @@ sub _saveStream {
     print $F $data;
   }
 
-  close($F)
-    || throw Error::Simple('RcsFast: close ' . $file . ' failed: ' . $!);
+  flock($fh, LOCK_UN) or die "RcsFast: failed to unlock file $file: $!";
+
+  close($F) or die "RcsFast: close $file failed: $!";
 
   chmod($Foswiki::cfg{Store}{filePermission}, $file);
 }
@@ -1686,7 +1765,7 @@ sub _getWebs {
 sub _deleteRevision {
   my ($this, $meta, $rev) = @_;
 
-  #_writeDebug("called _deleteRevision");
+  _writeDebug("called _deleteRevision");
 
   my $file = $this->_getPath(meta => $meta);
 
@@ -1697,8 +1776,7 @@ sub _deleteRevision {
   #_writeDebug("calling unlockCmd");
   my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{unlockCmd}, FILENAME => $file);
 
-  throw Error::Simple("RcsFast: unlockCmd failed: $stdout $stderr")
-    if $exit;
+  die "RcsFast: unlockCmd failed: $stdout $stderr" if $exit;
 
   chmod($Foswiki::cfg{Store}{filePermission}, $file);
 
@@ -1709,8 +1787,11 @@ sub _deleteRevision {
     FILENAME => $file
   );
 
-  throw Error::Simple("RcsFast: delRevCmd of $file failed: $stdout $stderr")
-    if $exit;
+  if ($exit) {
+    print STDERR "RcsFast: delRevCmd of $file failed, rev=$rev: $stdout $stderr\n";
+    #die "RcsFast: delRevCmd of $file failed, rev=$rev: $stdout $stderr");
+    return;
+  }
 
   $rev--;
   #_writeDebug("calling coCmd");
@@ -1720,12 +1801,11 @@ sub _deleteRevision {
     FILENAME => $file
   );
 
-  throw Error::Simple("RcsFast: coCmd of $file failed: $stdout $stderr")
-    if $exit;
-
-  $this->_unsetRevInfo($meta, undef, $rev);
+  die "RcsFast: coCmd of $file failed: $stdout $stderr" if $exit;
 
   $this->_saveFile($file, $stdout);
+  my $storableFile = $this->_getStorableFile($meta);
+  unlink($storableFile) if -e $storableFile;
 }
 
 =begin TML
@@ -1743,15 +1823,16 @@ sub _getLatestRevFromHistory {
   #_writeDebug("calling histCmd");
   my ($stdout, $exit, $stderr) = Foswiki::Sandbox->sysCommand($Foswiki::cfg{RcsFast}{histCmd}, FILENAME => $rcsFile);
 
-  throw Error::Simple("RcsFast: histCmd of $rcsFile failed: $stdout $stderr")
-    if $exit;
+  die "RcsFast: histCmd of $rcsFile failed: $stdout $stderr" if $exit;
 
   if ($stdout =~ /head:\s+\d+\.(\d+)\n/) {
     return $1;
   }
   if ($stdout =~ /total revisions: (\d+)\n/) {
+    print STDERR "WARNING: lasest revision not found in head, using total revisions in rcs file $rcsFile\n";
     return $1;
   }
+  print STDERR "WARNING: no head: or total revisions: information found in file $rcsFile\n";
 
   return 1;
 }
@@ -1856,7 +1937,7 @@ sub _split {
 sub _mtime {
   my $file = shift;
 
-  return (stat($file))[9];
+  return (stat($file))[9] || 0;
 }
 
 sub _rmtree {
@@ -1896,6 +1977,33 @@ sub _rmtree {
         warn 'RcsFast: Failed to delete ' . Encode::decode_utf8($root) . ": $!";
       }
     }
+  }
+}
+
+sub _copyMeta {
+  my ($source, $target) = @_;
+
+  $target->copyFrom($source);
+
+  foreach my $key (qw(_web _topic _loadedRev _latestIsLoaded _text)) {
+    my $val = $source->{$key};
+    $target->{$key} = $val if defined $val;
+  }
+
+  return $target;
+}
+
+sub _mkPathTo {
+  my $file = shift;
+
+  ASSERT(File::Spec->file_name_is_absolute($file)) if DEBUG;
+
+  my ($volume, $path, undef) = File::Spec->splitpath($file);
+  $path = File::Spec->catpath($volume, $path, '');
+
+  eval { File::Path::mkpath($path, 0, $Foswiki::cfg{Store}{dirPermission}); };
+  if ($@) {
+    die "RcsFast: failed to create $path: $!";
   }
 }
 

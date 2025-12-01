@@ -85,6 +85,14 @@ sub getPath {
   return "$Foswiki::cfg{DataDir}/$this->{test_web}/$topic.txt";
 }
 
+sub getStorable {
+  my ($this, $topic) = @_;
+
+  $topic //= 'SomeTopic';
+
+  return "$Foswiki::cfg{DataDir}/$this->{test_web}/.store/$topic/meta.db";
+}
+
 sub readRawTopic {
   my $this = shift;
 
@@ -173,8 +181,10 @@ sub test_save_topic {
 
   my $file = $this->getPath;
   my $rcsFile = $file . ',v';
+  my $storableFile = $this->getStorable;
 
   $this->assert(-e $file);
+  $this->assert(-e $storableFile);
   $this->assert(!-e $rcsFile, "there should be no rev file yet");
 
   $meta = $this->readTopic;
@@ -218,6 +228,7 @@ sub test_version_info {
   
   my $meta = $this->createTopic;
   $this->assert_equals(undef, $meta->getLoadedRev);
+
 
   $meta->text("hello world");
   $meta->save;
@@ -538,6 +549,7 @@ sub test_fix_topicinfo {
   my $file = $this->getPath();  
 
   # botch it 
+  sleep 1;
   my $raw = $meta->getEmbeddedStoreForm;
   $raw =~ s/version="2"/version="3"/g;
   $this->saveRawTopic(undef, $raw);
@@ -555,6 +567,7 @@ sub test_fix_topicinfo {
   $meta->save(forcenewrevision => 1);
 
   # botch it again
+  sleep 1;
   $raw =~ s/version="3"/version="2"/g;
   $this->saveRawTopic(undef, $raw);
 
@@ -653,13 +666,16 @@ sub test_remove_topic {
 
   my $file = $this->getPath;
   my $rcsFile = $file . ',v';
+  my $storableFile = $this->getStorable;
 
   $this->assert(!-e $file);
   $this->assert(!-e $rcsFile);
+  $this->assert(!-e $storableFile);
 
   $meta->save;
   $this->assert($meta->existsInStore);
   $this->assert(-e $file);
+  $this->assert(-e $storableFile);
   $this->assert(!-e $rcsFile);
 
   $meta->save(forcenewrevision => 1);
@@ -671,6 +687,7 @@ sub test_remove_topic {
   $this->assert(!$meta->existsInStore);
   $this->assert(!-e $file, "topic file still exists at $file");
   $this->assert(!-e $rcsFile, "rcs file still exists at $rcsFile");
+  $this->assert(!-e $storableFile, "meta.db still exists at $storableFile");
 }
 
 sub test_del_rev_topic {
@@ -707,6 +724,12 @@ sub test_move_topic {
   $meta->save;
   $this->assert($meta->existsInStore);
 
+  my $file = $this->getPath;
+  my $storableFile = $this->getStorable;
+
+  $this->assert(-e $file);
+  $this->assert(-e $storableFile);
+
   my $webObject = $this->readWeb;
   my $it = $webObject->eachTopic;
   my %topics = map {$_ => 1} $it->all();
@@ -715,8 +738,16 @@ sub test_move_topic {
   my $newMeta = $this->createTopic("SomeMoreTopic");
   $meta->move($newMeta);
 
+  $this->assert($newMeta->existsInStore, "new topic not found");
   $this->assert(!$meta->existsInStore);
-  $this->assert($newMeta->existsInStore);
+  $this->assert(!-e $file);
+  $this->assert(!-e $storableFile, "moved topic still has got a storable left behind at $storableFile");
+
+  $file = $this->getPath("SomeMoreTopic");
+  $storableFile = $this->getStorable("SomeMoreTopic");
+
+  $this->assert(-e $file);
+#  $this->assert(-e $storableFile);
  
   $it = $webObject->eachTopic;
   %topics = map {$_ => 1} $it->all();
