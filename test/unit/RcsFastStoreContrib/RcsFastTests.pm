@@ -24,6 +24,7 @@ use Foswiki();
 use Foswiki::Store();
 use Foswiki::Request::Upload ();
 use File::Temp;
+use Data::Dump qw(dump);
 
 our @ISA = ('FoswikiFnTestCase');
 
@@ -753,6 +754,54 @@ sub test_move_topic {
   %topics = map {$_ => 1} $it->all();
   $this->assert(!$topics{"SomeTopic"});
   $this->assert($topics{"SomeMoreTopic"});
+}
+
+sub test_attachment_versions {
+  my $this = shift;
+
+  my $now = time();
+  my $meta = $this->saveAttachment("SomeTopic", "SomeAttachment.txt", <<HERE, "my first revision");
+hello world
+HERE
+
+  sleep 1;
+  $meta = $this->saveAttachment("SomeTopic", "SomeAttachment.txt", <<HERE, "my second revision");
+hello world 2
+HERE
+
+  sleep 1;
+  $meta = $this->saveAttachment("SomeTopic", "SomeAttachment.txt", <<HERE, "my third revision");
+hello world 3
+HERE
+
+  my ($date, $user, $rev, $comment) = Foswiki::Func::getRevisionInfo($this->{test_web}, "SomeTopic", 1, "SomeAttachment.txt");
+  $this->assert_equals($user, "WikiGuest");
+  $this->assert_equals($now, $date);
+  $this->assert_equals(1, $rev);
+  
+  $meta = $this->readTopic();
+  my $atts = $meta->get("FILEATTACHMENT");
+  $this->assert($atts);
+  $this->assert_equals("SomeAttachment.txt", $atts->{name});
+  $this->assert_equals("SomeAttachment.txt", $atts->{attachment});
+  $this->assert_equals(3, $atts->{version});
+
+  my $info = $meta->getRevisionInfo("SomeAttachment.txt", 1);
+  $this->assert($info);
+  $this->assert_equals("BaseUserMapping_666", $info->{author});
+  $this->assert_equals($now, $info->{date});
+  $this->assert_equals(1, $info->{version});
+
+
+  ($date, $user, $rev, $comment) = Foswiki::Func::getRevisionInfo($this->{test_web}, "SomeTopic", 2, "SomeAttachment.txt");
+  $this->assert_equals($user, "WikiGuest");
+  $this->assert_equals(2, $rev);
+  #$this->assert_equals("my second revision", $comment) rcs does not preserve old comments;
+
+  ($date, $user, $rev, $comment) = Foswiki::Func::getRevisionInfo($this->{test_web}, "SomeTopic", 3, "SomeAttachment.txt");
+  $this->assert_equals($user, "WikiGuest");
+  $this->assert_equals(3, $rev);
+  #$this->assert_equals("my third revision", $comment); rcs does not preserve old comments
 }
 
 sub test_attachments {

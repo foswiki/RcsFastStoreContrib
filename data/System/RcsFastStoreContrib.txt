@@ -70,6 +70,7 @@ those files.
 ---++ Change History
 
 %TABLE{columnwidths="7em" tablewidth="100%"}%
+|  11 Dec 2025 | fixed locking |
 |  30 Nov 2025 | rewrite caching using Sereal |
 |  11 Mar 2025 | fixed possible race condition in store using proper locking |
 |  07 Jan 2025 | fixed a serious bug in delRev where rcs blocks the server process; using our own config set of rcs tools, i.e. not depending on !RCSStoreContrib to be installed as well |

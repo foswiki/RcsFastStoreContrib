@@ -196,12 +196,6 @@ sub checkTopic {
     }
   }
 
-  my $storableFile = _getStorableFile($web, $topic);
-  unless (-e $storableFile) {
-    # TODO: do we need this???
-    #$this->writeInfo(2, "... creating meta.db for $web.$topic");
-  }
-
   $this->checkAttachments($web, $topic, $stats);
 
   return $stats;
@@ -361,12 +355,6 @@ sub _getDataDir {
   my ($web, $topic) = @_;
 
   return $Foswiki::cfg{DataDir}.'/'.$web.'/'.$topic.'.txt';
-}
-
-sub _getStorableFile {
-  my ($web, $topic) = @_;
-
-  return $Foswiki::cfg{DataDir}.'/'.$web.'/'.$topic.'/.store/meta.db';
 }
 
 sub _getPubDir {
