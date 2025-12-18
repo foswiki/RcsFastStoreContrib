@@ -1,4 +1,4 @@
-%META:TOPICINFO{author="ProjectContributor" comment="" date="1764590302" format="1.1"  version="1"}%
+%META:TOPICINFO{author="ProjectContributor" comment="" date="1766078820" format="1.1"  version="1"}%
 ---+!! %TOPIC%
 %FORMFIELD{"Description"}%
 
@@ -70,6 +70,7 @@ those files.
 ---++ Change History
 
 %TABLE{columnwidths="7em" tablewidth="100%"}%
+|  18 Dec 2025 | protecting critical paths by a mutex now |
 |  11 Dec 2025 | fixed locking |
 |  30 Nov 2025 | rewrite caching using Sereal |
 |  11 Mar 2025 | fixed possible race condition in store using proper locking |

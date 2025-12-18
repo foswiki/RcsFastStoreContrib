@@ -976,14 +976,16 @@ sub test_eachChange {
   $this->assert($it);
 
   my @all = $it->all();
-  $this->assert(scalar(@all) eq 2, "there should be two initial change logs");
+  my $numChanges = scalar(@all);
+  $this->assert_equals(3, $numChanges, "there should be 3 initial change logs ... but found $numChanges");
 
   sleep 1;
 
   my $now = time();
   $it = $webMeta->eachChange($now);
   @all = $it->all();
-  $this->assert(!scalar(@all), "there shouldn't be any additional changes");
+  $numChanges = scalar(@all);
+  $this->assert(!$numChanges, "there shouldn't be any additional changes");
 
   my $meta = $this->createTopic;
   $meta->save;
@@ -993,7 +995,8 @@ sub test_eachChange {
   my $log = $it->next();
 
   @all = $it->all();
-  $this->assert(!scalar(@all), "there should be exactly one change log");
+  $numChanges = scalar(@all);
+  $this->assert(!$numChanges, "there should be exactly one change log");
   $this->assert_matches(qr/SomeTopic/, $log->{path}, "didn't find recent change");
 }
 
