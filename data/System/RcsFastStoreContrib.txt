@@ -1,4 +1,4 @@
-%META:TOPICINFO{author="ProjectContributor" comment="" date="1766149448" format="1.1"  version="1"}%
+%META:TOPICINFO{author="ProjectContributor" comment="" date="1766162451" format="1.1"  version="1"}%
 ---+!! %TOPIC%
 %FORMFIELD{"Description"}%
 
@@ -64,13 +64,29 @@ By default =checkStore= will only report the quantity of files that
 can be removed and the amount of disk space that will be freed in that manner.
 Only when adding the =unlink=on= paramteter will the procedure actually remove
 those files.
+
+---++ Webserver configuration
+
+Note that the =pub/.../.store/= directories and =pub/.../*,v= files must be protected in your webserver's configuration.
+For NGINX use something like:
+
+<verbatim>
+location ~ .store {
+  return 403;
+}
+
+location ~ ,v$ {
+  return 403;
+}
+</verbatim>
 ---++ Dependencies
 %$DEPENDENCIES%
 
 ---++ Change History
 
 %TABLE{columnwidths="7em" tablewidth="100%"}%
-|  19 Dec 2025 | invalidate loaded prefs when restoring a meta object from cache |
+|  19 Dec 2025 | invalidate loaded prefs when restoring a meta object from cache; \
+                 document required settings for the webserver to protect internal store information |
 |  18 Dec 2025 | protecting critical paths by a mutex now |
 |  11 Dec 2025 | fixed locking |
 |  30 Nov 2025 | rewrite caching using Sereal |
